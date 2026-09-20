@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pipeline.classify import distance_bucket, infer_play, is_scrimmage
 from pipeline.espn import EspnClient
 from pipeline.ingest import parse_game
