@@ -1,0 +1,64 @@
+{
+  "n_games": 157,
+  "n_drives": 2118,
+  "n_plays": 15639,
+  "n_scrimmage": 11988,
+  "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+  ],
+  "eras": [
+    {
+      "era_id": "osu",
+      "era": "Oklahoma State",
+      "role": "HC",
+      "games": 3
+    },
+    {
+      "era_id": "ttu",
+      "era": "Texas Tech",
+      "role": "OC",
+      "games": 63
+    },
+    {
+      "era_id": "uiw",
+      "era": "Incarnate Word",
+      "role": "HC",
+      "games": 40
+    },
+    {
+      "era_id": "unt",
+      "era": "North Texas",
+      "role": "HC",
+      "games": 39
+    },
+    {
+      "era_id": "wsu",
+      "era": "Washington State",
+      "role": "OC",
+      "games": 12
+    }
+  ],
+  "skipped": [
+    "401030185 no drives",
+    "401100035 no drives",
+    "401403984 no drives"
+  ],
+  "paths": {
+    "games": "C:\\DriveCharts\\data\\games.parquet",
+    "drives": "C:\\DriveCharts\\data\\drives.parquet",
+    "plays": "C:\\DriveCharts\\data\\plays.parquet"
+  }
+}

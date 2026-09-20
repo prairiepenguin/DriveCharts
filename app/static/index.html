@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Morris Playbook</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="turf"></div>
+    <header class="top">
+      <div>
+        <p class="kicker">Eric Morris · OC / HC · 2013–2026</p>
+        <h1>Playbook</h1>
+        <p class="sub">
+          Every offensive play, kept in drive order. Built for play-selection
+          analysis — not box-score summaries.
+        </p>
+      </div>
+      <div class="top-meta" id="top-meta">Loading dataset…</div>
+    </header>
+
+    <section class="filters">
+      <div class="eras" id="eras"></div>
+      <div class="filter-row">
+        <label>
+          Season
+          <select id="season">
+            <option value="">All seasons</option>
+          </select>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="garbage" checked />
+          Drop garbage time
+        </label>
+        <div class="tabs" id="tabs">
+          <button data-tab="playbook" class="on">Down &amp; distance</button>
+          <button data-tab="drives">Drive charts</button>
+          <button data-tab="sequence">Sequencing</button>
+          <button data-tab="situations">Situations</button>
+          <button data-tab="eras-tab">By era</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="kpis" id="kpis"></section>
+    <main id="main" class="main"></main>
+    <section class="plays-wrap">
+      <div class="plays-head">
+        <h2 id="plays-title">Plays</h2>
+        <p id="plays-count"></p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Opp</th>
+              <th>Drive</th>
+              <th>Sit</th>
+              <th>Call</th>
+              <th>Yds</th>
+              <th>Play</th>
+            </tr>
+          </thead>
+          <tbody id="plays-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <footer>
+      Source: ESPN play-by-play via game summaries. Pass calls include sacks and
+      scrambles. 2013 Texas Tech is co-OC. Spring 2021 UIW is tagged as 2020.
+    </footer>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
