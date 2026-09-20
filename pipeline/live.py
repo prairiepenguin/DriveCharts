@@ -6,9 +6,44 @@ from pipeline.classify import distance_bucket, infer_play, is_scrimmage
 from pipeline.espn import EspnClient
 from pipeline.ingest import parse_game
 from pipeline.stints import STINTS
-from app.predict import field_zone, score_bucket, situation_label
 
 OSU = next(s for s in STINTS if s["era_id"] == "osu")
+def field_zone(yards_to_endzone) -> str:
+    try:
+        yte = int(yards_to_endzone)
+    except (TypeError, ValueError):
+        return "other"
+    if 0 < yte <= 20:
+        return "red"
+    if yte >= 80:
+        return "backed"
+    if yte <= 50:
+        return "plus"
+    return "other"
+
+
+def score_bucket(score_diff) -> str:
+    try:
+        diff = int(score_diff)
+    except (TypeError, ValueError):
+        return "close"
+    if diff <= -8:
+        return "trail"
+    if diff >= 8:
+        return "lead"
+    return "close"
+
+
+def situation_label(sit: dict) -> str:
+    down = sit.get("down")
+    dist = sit.get("distance")
+    spot = sit.get("yardline_text") or ""
+    down_s = f"{down} & {dist}" if down and dist is not None else "Unknown down"
+    prev = sit.get("prev_play_call")
+    prev_s = f" after {prev.lower()}" if prev else " (drive start)"
+    return f"{down_s} · {spot}{prev_s}".strip(" ·")
+
+
 LIVE_NAMES = {
     "STATUS_IN_PROGRESS",
     "STATUS_HALFTIME",

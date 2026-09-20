@@ -226,3 +226,44 @@ def fit(window: str = "current") -> Predictor:
     if window not in WINDOWS:
         window = "current"
     return Predictor(training_plays(window), window)
+
+
+def score_game(game_id: str, window: str = "current") -> pd.DataFrame:
+    """Leave-one-game-out predictions for every scrimmage snap in a game."""
+    from app.analysis import filter_plays, load_tables
+
+    predictor = fit(window)
+    plays = filter_plays(load_tables()["plays"], game_id=str(game_id), exclude_garbage=False)
+    plays = plays[plays["play_call"].isin(["Run", "Pass"])].reset_index(drop=True)
+    rows = []
+    for _, rec in plays.iterrows():
+        sit = situation_from_play(rec)
+        pred = predictor.predict(sit, exclude_game_id=str(game_id))
+        actual = rec["play_call"]
+        rows.append(
+            {
+                "down": sit.get("down"),
+                "distance": sit.get("distance"),
+                "period": rec.get("period"),
+                "clock": rec.get("clock"),
+                "yardline_text": rec.get("yardline_text"),
+                "description": rec.get("description"),
+                "yards": rec.get("yards"),
+                "actual": actual,
+                "garbage_time": bool(rec.get("garbage_time")),
+                "predicted": pred["call"],
+                "p_pass": pred["p_pass"],
+                "p_run": pred["p_run"],
+                "n": pred["n"],
+                "level": pred["level"],
+                "window": pred["window"],
+                "situation": pred["situation"],
+                "pass_ypp": pred["pass_ypp"],
+                "run_ypp": pred["run_ypp"],
+                "success_if_pass": pred["success_if_pass"],
+                "success_if_run": pred["success_if_run"],
+                "hit": pred["call"] == actual,
+                "brier": ((pred["p_pass"] or 0) - (1 if actual == "Pass" else 0)) ** 2,
+            }
+        )
+    return pd.DataFrame(rows)
