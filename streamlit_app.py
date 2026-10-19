@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app import analysis
+from app.refresh import render_update_control
 
 st.set_page_config(page_title="Morris Playbook", page_icon="🏈", layout="wide")
 
@@ -182,6 +183,7 @@ st.caption(
     "The percentage on down-and-distance tiles is **pass rate**. "
     "Open **Live game** in the sidebar to poll ESPN and predict the next snap."
 )
+render_update_control()
 
 era_labels = ["All eras"] + [f"{e['era']} ({e['role']})" for e in info["eras"]]
 season_labels = ["All seasons"] + [str(s) for s in info["seasons"]]

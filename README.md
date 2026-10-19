@@ -29,6 +29,8 @@ streamlit run streamlit_app.py
 
 Opens a local URL (usually http://localhost:8501). Share that link on your LAN, or deploy to Streamlit Community Cloud.
 
+**Update games** in the sidebar downloads completed games from ESPN into the running app. Games already cached in `data/raw/` are not downloaded again. On Streamlit Cloud the new files last until the app restarts; commit and push the three parquet files if the update should survive a reboot.
+
 The original FastAPI UI is still available with `python -m app.server` at http://127.0.0.1:8765.
 
 ### Share on Streamlit Cloud

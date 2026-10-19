@@ -7,6 +7,7 @@ import streamlit as st
 
 from app.analysis import load_tables
 from app.predict import WINDOWS, fit, score_game
+from app.refresh import render_update_control
 from pipeline.classify import is_garbage_time
 from pipeline.live import fetch_schedule, fetch_summary, next_snap, parse_live, pick_default_game
 
@@ -17,6 +18,7 @@ st.caption(
     "from Morris's recent play-calling. This is a situation model, not the play on the call sheet. "
     "No-huddle can beat the ESPN delay."
 )
+render_update_control()
 
 
 def pct(v) -> str:
