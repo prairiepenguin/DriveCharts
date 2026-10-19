@@ -39,6 +39,16 @@ The original FastAPI UI is still available with `python -m app.server` at http:/
 
 Anyone with the Cloud URL can use the app in a browser. After new games, re-run ingest, commit the three parquet files, and push.
 
+### Link to one game
+
+Open **Drive charts** and copy the link under the game picker. It includes `view=Drive charts` and `game=` with the date, score, opponent, and ESPN game id, for example Houston on 2026-10-17:
+
+```text
+/?view=Drive+charts&game=2026-10-17+L+32-35+HOU+401856831
+```
+
+That opens the drive chart for that game. The newest game is selected on a first visit, and choosing it keeps the id in the URL so the link still points at that game after later weeks are added.
+
 ## Live next-snap predictions
 
 The Streamlit sidebar has a **Live game** page. During an Oklahoma State game it polls ESPN every few seconds and, when OSU has the ball, predicts pass vs run for the upcoming snap from similar Morris situations (default: UNT 2023–25 + OSU 2026).
@@ -47,7 +57,7 @@ It will lag the broadcast, especially in no-huddle. It predicts call type, not t
 
 Re-run ingest after new games. Cached ESPN summaries live in `data/raw/`. Use `--refresh` to re-download.
 
-Current dataset: **157 games**, **2,118 drives**, **11,988 scrimmage plays** (2013–2026). Three games have no ESPN drive chart and are skipped: UIW vs Stephen F. Austin (2018-09-15), UIW at Montana State (2018-11-24 FCS playoff), and Washington State at Wisconsin (2022-09-10).
+Current dataset: **160 games**, **2,149 drives**, **12,170 scrimmage plays** (2013–2026), refreshed 2026-10-19. Oklahoma State 2026 is six completed games through Houston (2026-10-17). Week 5 was a bye. Colorado on 2026-10-24 is not played yet. Three games have no ESPN drive chart and are skipped: UIW vs Stephen F. Austin (2018-09-15), UIW at Montana State (2018-11-24 FCS playoff), and Washington State at Wisconsin (2022-09-10).
 
 ## What you can analyze
 

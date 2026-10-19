@@ -1,8 +1,8 @@
 {
-  "n_games": 157,
-  "n_drives": 2118,
-  "n_plays": 15639,
-  "n_scrimmage": 11988,
+  "n_games": 160,
+  "n_drives": 2149,
+  "n_plays": 15890,
+  "n_scrimmage": 12170,
   "seasons": [
     2013,
     2014,
@@ -24,7 +24,7 @@
       "era_id": "osu",
       "era": "Oklahoma State",
       "role": "HC",
-      "games": 3
+      "games": 6
     },
     {
       "era_id": "ttu",
@@ -57,8 +57,8 @@
     "401403984 no drives"
   ],
   "paths": {
-    "games": "C:\\DriveCharts\\data\\games.parquet",
-    "drives": "C:\\DriveCharts\\data\\drives.parquet",
-    "plays": "C:\\DriveCharts\\data\\plays.parquet"
+    "games": "data/games.parquet",
+    "drives": "data/drives.parquet",
+    "plays": "data/plays.parquet"
   }
 }

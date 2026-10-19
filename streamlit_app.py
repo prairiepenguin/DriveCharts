@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode, urlsplit, urlunsplit
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -125,6 +127,32 @@ def field_bar(start_yte, yards, result: str) -> str:
     )
 
 
+def game_option_label(row: pd.Series) -> str:
+    abbrev = row.get("opponent_abbrev") or row.get("opponent") or "OPP"
+    try:
+        score_us = int(row["team_score"])
+        score_them = int(row["opp_score"])
+    except (TypeError, ValueError):
+        score_us, score_them = 0, 0
+    result = row.get("result") or ""
+    return f"{row['date']} {result} {score_us}-{score_them} {abbrev} {row['game_id']}"
+
+
+def game_share_url(label: str) -> str:
+    """Absolute link when the app knows its host, otherwise just the query."""
+    query = urlencode({"view": "Drive charts", "game": label})
+    parts = urlsplit(st.context.url or "")
+    if not parts.scheme or not parts.netloc:
+        return f"?{query}"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+
+
+def url_has_query_key(key: str) -> bool:
+    url = st.context.url or ""
+    query = url.split("?", 1)[1] if "?" in url else ""
+    return any(part.split("=", 1)[0] == key for part in query.split("&") if part)
+
+
 def play_table(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -180,8 +208,23 @@ k6.metric("1st-down pass", pct(ov["first_down_pass_rate"]))
 k7.metric("Pts / drive", num(ov["points_per_drive"]))
 k8.metric("3-and-out", pct(ov["three_and_out_rate"]))
 
+tab_labels = [
+    "Down & distance",
+    "Drive charts",
+    "Sequencing",
+    "Situations",
+    "By era",
+    "Where it went",
+]
+# A shared ?game= link should land on the drive chart. The tab widget
+# still prefers an explicit ?view= value on first load.
+if url_has_query_key("game") and "view" not in st.session_state:
+    st.session_state["view"] = "Drive charts"
 tab_heat, tab_drives, tab_seq, tab_sit, tab_eras, tab_dir = st.tabs(
-    ["Down & distance", "Drive charts", "Sequencing", "Situations", "By era", "Where it went"]
+    tab_labels,
+    key="view",
+    bind="query-params",
+    default="Down & distance",
 )
 
 with tab_heat:
@@ -219,42 +262,60 @@ with tab_drives:
         st.info("No games in this filter.")
     else:
         games = games.copy()
-        games["label"] = games.apply(
-            lambda r: f"{r['date']}  {r.get('result','')} {r.get('team_score','')}-{r.get('opp_score','')} vs {r.get('opponent_abbrev') or r.get('opponent')}",
-            axis=1,
+        games["game_id"] = games["game_id"].astype(str)
+        ids = games["game_id"].tolist()
+        labels = {
+            row["game_id"]: game_option_label(row)
+            for _, row in games.iterrows()
+        }
+        # index 0 is the widget default, so it is omitted from the URL.
+        # Any other game, including the newest, stays in ?game= and can be copied.
+        if st.session_state.get("game") not in ids:
+            st.session_state["game"] = ids[-1]
+        game_id = st.selectbox(
+            "Game",
+            ids,
+            index=0,
+            format_func=lambda gid: labels.get(gid, str(gid)),
+            key="game",
+            bind="query-params",
+            help="Picking a game also updates the address bar.",
         )
-        pick = st.selectbox("Game", games["label"].tolist(), index=len(games) - 1)
-        game_id = games.loc[games["label"] == pick, "game_id"].iloc[0]
-        game, drives, plays = analysis.game_drives(str(game_id))
-        st.subheader(
-            f"{game['result']} {game['team_score']}–{game['opp_score']} vs {game['opponent']}"
-        )
-        st.caption(f"{game['date']} · {game['era']} · {game['home_away']}")
-        for _, drv in drives.iterrows():
-            with st.expander(
-                f"Drive {int(drv['drive_number'])} · {drv.get('start_text') or ''} → {drv.get('result')} · "
-                f"{drv.get('scrimmage_plays') or drv.get('offensive_plays') or 0} plays · "
-                f"{drv.get('yards') or 0} yds · {drv.get('time_elapsed') or ''}",
-                expanded=False,
-            ):
-                st.markdown(
-                    field_bar(drv.get("start_yards_to_endzone"), drv.get("yards"), drv.get("result")),
-                    unsafe_allow_html=True,
-                )
-                d_plays = plays[plays["drive_id"].astype(str) == str(drv["drive_id"])]
-                d_plays = d_plays[d_plays["scrimmage"] == True]  # noqa: E712
-                d_plays = d_plays.sort_values(["drive_play_number", "sequence_number"], na_position="last")
-                if d_plays.empty:
-                    st.write("No scrimmage plays.")
-                else:
-                    show = d_plays[
-                        [
-                            c
-                            for c in ["period", "clock", "down", "distance", "play_call", "yards", "description"]
-                            if c in d_plays.columns
+        if str(game_id) not in labels:
+            st.warning("That game is not in the current era or season filter.")
+        else:
+            st.caption("Copy this link to open this drive chart.")
+            st.code(game_share_url(labels[str(game_id)]), language=None, wrap_lines=True)
+            game, drives, plays = analysis.game_drives(str(game_id))
+            st.subheader(
+                f"{game['result']} {game['team_score']}–{game['opp_score']} vs {game['opponent']}"
+            )
+            st.caption(f"{game['date']} · {game['era']} · {game['home_away']}")
+            for _, drv in drives.iterrows():
+                with st.expander(
+                    f"Drive {int(drv['drive_number'])} · {drv.get('start_text') or ''} → {drv.get('result')} · "
+                    f"{drv.get('scrimmage_plays') or drv.get('offensive_plays') or 0} plays · "
+                    f"{drv.get('yards') or 0} yds · {drv.get('time_elapsed') or ''}",
+                    expanded=False,
+                ):
+                    st.markdown(
+                        field_bar(drv.get("start_yards_to_endzone"), drv.get("yards"), drv.get("result")),
+                        unsafe_allow_html=True,
+                    )
+                    d_plays = plays[plays["drive_id"].astype(str) == str(drv["drive_id"])]
+                    d_plays = d_plays[d_plays["scrimmage"] == True]  # noqa: E712
+                    d_plays = d_plays.sort_values(["drive_play_number", "sequence_number"], na_position="last")
+                    if d_plays.empty:
+                        st.write("No scrimmage plays.")
+                    else:
+                        show = d_plays[
+                            [
+                                c
+                                for c in ["period", "clock", "down", "distance", "play_call", "yards", "description"]
+                                if c in d_plays.columns
+                            ]
                         ]
-                    ]
-                    st.dataframe(show, width="stretch", hide_index=True)
+                        st.dataframe(show, width="stretch", hide_index=True)
 
 with tab_seq:
     seq = analysis.sequencing(era=era, season=season, exclude_garbage=drop_garbage)

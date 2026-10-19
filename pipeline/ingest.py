@@ -399,6 +399,12 @@ def ingest(refresh: bool = False) -> dict:
     drives_df.to_parquet(drives_path, index=False)
     plays_df.to_parquet(plays_path, index=False)
 
+    def _rel(path: Path) -> str:
+        try:
+            return path.relative_to(ROOT).as_posix()
+        except ValueError:
+            return path.as_posix()
+
     meta = {
         "n_games": int(len(games_df)),
         "n_drives": int(len(drives_df)),
@@ -415,9 +421,9 @@ def ingest(refresh: bool = False) -> dict:
         ),
         "skipped": skipped,
         "paths": {
-            "games": str(games_path),
-            "drives": str(drives_path),
-            "plays": str(plays_path),
+            "games": _rel(games_path),
+            "drives": _rel(drives_path),
+            "plays": _rel(plays_path),
         },
     }
     (DATA / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
