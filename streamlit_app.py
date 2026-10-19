@@ -193,6 +193,14 @@ def rate_table(
     st.dataframe(show, width="stretch", hide_index=True, column_config=config, alt=alt)
 
 
+ENOUGH_LABEL = "Enough for the down*"
+ENOUGH_NOTE = (
+    "* Enough for the down is the share of plays that did what the down asked: "
+    "a touchdown, a first down, at least half the yards to go on first down, "
+    "70% on second down, or the full distance on third and fourth."
+)
+
+
 def _gap(osu: float | None, history: float | None) -> float | None:
     if osu is None or history is None:
         return None
@@ -223,8 +231,8 @@ CALL_COMPARE_COLUMNS = [
     ("pass_gap", "Pass gap"),
     ("history_td", "Snap TD, history"),
     ("osu_td", "Snap TD, OSU"),
-    ("history_success", "Snap success, history"),
-    ("osu_success", "Snap success, OSU"),
+    ("history_success", "Enough*, history"),
+    ("osu_success", "Enough*, OSU"),
 ]
 CALL_COMPARE_PERCENTS = {
     "History pass",
@@ -232,8 +240,8 @@ CALL_COMPARE_PERCENTS = {
     "Pass gap",
     "Snap TD, history",
     "Snap TD, OSU",
-    "Snap success, history",
-    "Snap success, OSU",
+    "Enough*, history",
+    "Enough*, OSU",
 }
 
 
@@ -267,7 +275,7 @@ def render_rz_compare(drop_garbage: bool) -> None:
     )
     st.caption(
         "Trip TD rate and Trips scored count each drive once. A scored trip ended in a touchdown or a made field goal. "
-        "Pass rate and Snap success count each play."
+        "Pass rate and Enough for the down* count each play."
     )
     rate_table(
         [
@@ -290,7 +298,7 @@ def render_rz_compare(drop_garbage: bool) -> None:
                 "gap": _gap(osu["summary"]["pass_rate"], history["summary"]["pass_rate"]),
             },
             {
-                "measure": "Snap success",
+                "measure": ENOUGH_LABEL,
                 "history": history["summary"]["success_rate"],
                 "osu": osu["summary"]["success_rate"],
                 "gap": _gap(osu["summary"]["success_rate"], history["summary"]["success_rate"]),
@@ -300,6 +308,7 @@ def render_rz_compare(drop_garbage: bool) -> None:
         {"History", "Oklahoma State", "Gap"},
         "Red-zone rates for prior stops and Oklahoma State",
     )
+    st.caption(ENOUGH_NOTE)
 
     st.subheader("The call by how close they are")
     bands = [
@@ -327,7 +336,8 @@ def render_rz_compare(drop_garbage: bool) -> None:
             x_label="Yards to the end zone",
             y_label="Pass rate (%)",
             sort=False,
-            alt="Red-zone pass rate by field position for history and Oklahoma State",
+            stack=False,
+            alt="Red-zone pass rate by field position, history and Oklahoma State side by side",
         )
     rate_table(bands, CALL_COMPARE_COLUMNS, CALL_COMPARE_PERCENTS, "Red-zone pass rate by field position, history against Oklahoma State")
 
@@ -414,9 +424,9 @@ def render_rz_compare(drop_garbage: bool) -> None:
             ("first_down_pass_rate", "1st-down pass"),
             ("inside5_pass_rate", "Inside the 5"),
             ("goal_pass_rate", "Goal to go"),
-            ("success_rate", "Snap success"),
+            ("success_rate", ENOUGH_LABEL),
         ],
-        {"TD trips", "Trips scored", "Pass", "1st-down pass", "Inside the 5", "Goal to go", "Snap success"},
+        {"TD trips", "Trips scored", "Pass", "1st-down pass", "Inside the 5", "Goal to go", ENOUGH_LABEL},
         "Red-zone results for each stop before Oklahoma State",
     )
 
@@ -453,10 +463,11 @@ def render_red_zone(era: str | None, season: str | None, drop_garbage: bool) -> 
         ("Trips scored", pct(trip["score_rate"]), "Trips that ended in a touchdown or a made field goal"),
         ("Points / trip", num(trip["points_per_trip"]), "Six for a touchdown, three for a field goal"),
         ("Pass rate", pct(summary["pass_rate"]), "Share of scrimmage snaps that were passes"),
-        ("Snap success", pct(summary["success_rate"]), "Share of snaps that were a touchdown, a first down, or enough yards for the down"),
+        (ENOUGH_LABEL, pct(summary["success_rate"]), "A touchdown, a first down, half the yards on first down, 70% on second, or the full distance on third and fourth"),
     ]
     for col, (label, value, help_text) in zip(cards, values):
         col.metric(label, value, help=help_text, border=True, height="stretch")
+    st.caption(ENOUGH_NOTE)
     rest = report["rest_pass_rate"]
     st.caption(
         f"{summary['n']:,} scrimmage snaps. Pass rate is {pct(summary['pass_rate'])} here and "
@@ -630,9 +641,9 @@ def render_red_zone(era: str | None, season: str | None, drop_garbage: bool) -> 
             ("first_down_pass_rate", "1st-down pass"),
             ("inside5_pass_rate", "Inside the 5"),
             ("goal_pass_rate", "Goal to go"),
-            ("success_rate", "Snap success"),
+            ("success_rate", ENOUGH_LABEL),
         ],
-        {"TD trips", "Trips scored", "Pass", "1st-down pass", "Inside the 5", "Goal to go", "Snap success"},
+        {"TD trips", "Trips scored", "Pass", "1st-down pass", "Inside the 5", "Goal to go", ENOUGH_LABEL},
         "Red-zone trips and pass rate by era or season",
     )
 
