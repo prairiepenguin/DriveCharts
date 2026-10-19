@@ -170,6 +170,323 @@ def play_table(df: pd.DataFrame) -> pd.DataFrame:
     return show[cols]
 
 
+def rate_table(rows: list[dict], columns: list[tuple[str, str]], percent: set[str], alt: str) -> None:
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        st.info("No plays in this slice.")
+        return
+    rename = {src: label for src, label in columns}
+    show = frame.rename(columns=rename)[[label for _, label in columns]]
+    config = {}
+    for label in rename.values():
+        if label in percent:
+            config[label] = st.column_config.NumberColumn(format=".0%")
+        elif label in {"Yds/play", "Pts/trip"}:
+            config[label] = st.column_config.NumberColumn(format=".1f")
+    st.dataframe(show, width="stretch", hide_index=True, column_config=config, alt=alt)
+
+
+def render_red_zone(era: str | None, season: str | None, drop_garbage: bool) -> None:
+    report = analysis.red_zone_report(era=era, season=season, exclude_garbage=drop_garbage)
+    st.caption(
+        "The red zone is the opponent's 20-yard line through the goal line. "
+        "A trip is a drive with at least one scrimmage snap there. "
+        "Pass rate counts sacks and scrambles as passes. "
+        "Points per trip are 6 for a touchdown and 3 for a field goal, without the extra point."
+    )
+    if report["plays"] == 0:
+        st.info("No red-zone scrimmage plays in this filter.")
+        return
+
+    summary = report["summary"]
+    trip = report["trip"]
+    cards = st.columns(6)
+    values = [
+        ("Trips", f"{report['trips']:,}", "Drives that reached the red zone"),
+        ("TD rate", pct(trip["td_rate"]), "Trips that ended in a touchdown"),
+        ("Score rate", pct(trip["score_rate"]), "Trips that ended in a touchdown or a made field goal"),
+        ("Points / trip", num(trip["points_per_trip"]), "Six for a touchdown, three for a field goal"),
+        ("Pass rate", pct(summary["pass_rate"]), "Share of scrimmage snaps that were passes"),
+        ("Success", pct(summary["success_rate"]), "Down-and-distance success rate on those snaps"),
+    ]
+    for col, (label, value, help_text) in zip(cards, values):
+        col.metric(label, value, help=help_text, border=True, height="stretch")
+    rest = report["rest_pass_rate"]
+    st.caption(
+        f"{summary['n']:,} scrimmage snaps. Pass rate is {pct(summary['pass_rate'])} here and "
+        f"{pct(rest)} on the other {report['rest_plays']:,} snaps in this filter. "
+        f"Snap touchdowns: {summary['rush_td']:,} rushing, {summary['pass_td']:,} passing. "
+        f"Turnovers on {pct(summary['turnover_rate'])} of snaps."
+    )
+
+    st.subheader("How the drive ends")
+    end_chart, end_note = st.columns([1, 1])
+    with end_chart:
+        results = pd.DataFrame(trip["results"])
+        st.bar_chart(
+            results,
+            x="result",
+            y="n",
+            x_label="Drive result",
+            y_label="Trips",
+            horizontal=True,
+            sort=False,
+            color="#ff6a12",
+            alt="Red-zone trips by how the drive ended",
+        )
+    with end_note:
+        st.caption(
+            f"Made field goals {pct(trip['fg_rate'])}. "
+            f"Missed field goals {pct(trip['missed_fg_rate'])}. "
+            f"Turnovers {pct(trip['turnover_rate'])}. "
+            f"Downs {pct(trip['downs_rate'])}."
+        )
+        rate_table(
+            trip["results"],
+            [("result", "Result"), ("n", "Trips"), ("share", "Share")],
+            {"Share"},
+            "Share of red-zone trips by drive result",
+        )
+
+    st.subheader("The call by how close they are")
+    st.caption(
+        "Inside the 5 he runs more often, and a much larger share of those snaps score. "
+        "From 11 to 20 the call is closer to a normal down."
+    )
+    band_rows = [row for row in report["bands"] if row["n"]]
+    band_chart = pd.DataFrame(
+        {
+            "Spot": [row["spot"] for row in band_rows],
+            "Pass rate": [round(row["pass_rate"] * 100, 1) for row in band_rows],
+        }
+    )
+    if not band_chart.empty:
+        st.bar_chart(
+            band_chart,
+            x="Spot",
+            y="Pass rate",
+            x_label="Yards to the end zone",
+            y_label="Pass rate (%)",
+            sort=False,
+            color="#ff6a12",
+            alt="Red-zone pass rate by yards to the end zone",
+        )
+    rate_table(
+        report["bands"],
+        [
+            ("spot", "Spot"),
+            ("n", "Plays"),
+            ("pass_rate", "Pass"),
+            ("first_down_pass_rate", "1st-down pass"),
+            ("success_rate", "Success"),
+            ("td_rate", "TD on the snap"),
+            ("yards_per_play", "Yds/play"),
+        ],
+        {"Pass", "1st-down pass", "Success", "TD on the snap"},
+        "Red-zone call and result by yards to the end zone",
+    )
+
+    st.subheader("Down and distance")
+    st.caption("Yards to go for a first down, only on snaps already inside the 20. Green is more run, orange is more pass.")
+    st.plotly_chart(
+        heatmap(report["down_distance"]),
+        width="stretch",
+        alt="Red-zone pass rate by down and distance",
+    )
+
+    st.subheader("Goal to go")
+    st.caption("Goal to go means the line to gain is the goal line, not just that the ball is inside the 20.")
+    rate_table(
+        [
+            {"slice": "Inside the 20, not goal to go", **report["not_goal"]},
+            {"slice": "Goal to go", **report["goal_to_go"]},
+            {"slice": "1st and goal", **report["first_and_goal"]},
+        ],
+        [
+            ("slice", "Slice"),
+            ("n", "Plays"),
+            ("pass_rate", "Pass"),
+            ("success_rate", "Success"),
+            ("td_rate", "TD on the snap"),
+            ("yards_per_play", "Yds/play"),
+        ],
+        {"Pass", "Success", "TD on the snap"},
+        "Red-zone calls on goal to go and on 1st and goal",
+    )
+
+    st.subheader("Fourth down: kick or go")
+    st.caption(
+        "A snap counts when it was a run, a pass, or a field goal. "
+        "Penalties and timeouts are left out. Made field goals are kicks whose ESPN type says good."
+    )
+    rate_table(
+        report["fourth"],
+        [
+            ("spot", "Spot"),
+            ("n", "Snaps"),
+            ("kick", "Kick"),
+            ("made", "Made"),
+            ("go", "Go"),
+            ("pass_rate", "Pass when they go"),
+            ("success_rate", "Success when they go"),
+            ("td_rate", "TD when they go"),
+        ],
+        {"Pass when they go", "Success when they go", "TD when they go"},
+        "Fourth-down field goals and go-for-it calls in the red zone",
+    )
+
+    st.subheader("The snap that gets them there, and what follows")
+    st.caption(
+        "The first snap is the first scrimmage play of the drive inside the 20. "
+        "Later rows are only snaps after another red-zone play on that same drive."
+    )
+    rate_table(
+        [{"situation": name, **block} for name, block in report["sequence"].items()],
+        [
+            ("situation", "Situation"),
+            ("n", "Plays"),
+            ("pass_rate", "Pass"),
+            ("success_rate", "Success"),
+            ("td_rate", "TD on the snap"),
+            ("yards_per_play", "Yds/play"),
+        ],
+        {"Pass", "Success", "TD on the snap"},
+        "Red-zone pass rate on the entry snap and on later snaps",
+    )
+
+    st.subheader("Score")
+    rate_table(
+        report["score"],
+        [
+            ("situation", "Score"),
+            ("n", "Plays"),
+            ("pass_rate", "Pass"),
+            ("success_rate", "Success"),
+            ("td_rate", "TD on the snap"),
+            ("yards_per_play", "Yds/play"),
+        ],
+        {"Pass", "Success", "TD on the snap"},
+        "Red-zone pass rate by score margin",
+    )
+
+    split_title = "By season" if report["split_kind"] == "season" else "By era"
+    st.subheader(split_title)
+    rate_table(
+        report["splits"],
+        [
+            ("label", "Season" if report["split_kind"] == "season" else "Era"),
+            ("trips", "Trips"),
+            ("td_trip_rate", "TD trips"),
+            ("score_rate", "Score"),
+            ("points_per_trip", "Pts/trip"),
+            ("n", "Plays"),
+            ("pass_rate", "Pass"),
+            ("first_down_pass_rate", "1st-down pass"),
+            ("inside5_pass_rate", "Inside the 5"),
+            ("goal_pass_rate", "Goal to go"),
+            ("success_rate", "Success"),
+        ],
+        {"TD trips", "Score", "Pass", "1st-down pass", "Inside the 5", "Goal to go", "Success"},
+        "Red-zone trips and pass rate by era or season",
+    )
+
+    st.subheader("What the snap was")
+    detail = pd.DataFrame(report["details"])
+    st.bar_chart(
+        detail,
+        x="detail",
+        y="n",
+        x_label="Play",
+        y_label="Snaps",
+        horizontal=True,
+        sort=False,
+        color="#ff6a12",
+        alt="Red-zone snaps by play type",
+    )
+
+    gun = report["shotgun"]
+    if gun:
+        st.subheader("Shotgun")
+        st.caption(
+            "Shotgun is read from the ESPN play text. In this dataset that tag shows up for "
+            + " and ".join(gun["eras"])
+            + ", not for the earlier stops. Plays without the word are grouped as under center, which can include shotgun snaps ESPN did not label."
+        )
+        gun_cards = st.columns(2)
+        gun_cards[0].metric("Shotgun snaps", f"{gun['shotgun_n']:,}", help=f"Of {gun['n']:,} snaps in tagged seasons")
+        gun_cards[1].metric("Pass rate from shotgun", pct(gun["from_gun"]["pass_rate"]))
+        rate_table(
+            [
+                {"look": "Shotgun", **gun["from_gun"]},
+                {"look": "No shotgun tag", **gun["under_center"]},
+            ],
+            [
+                ("look", "Look"),
+                ("n", "Plays"),
+                ("pass_rate", "Pass"),
+                ("success_rate", "Success"),
+                ("td_rate", "TD on the snap"),
+                ("yards_per_play", "Yds/play"),
+            ],
+            {"Pass", "Success", "TD on the snap"},
+            "Red-zone calls from shotgun and without a shotgun tag",
+        )
+
+    direction = report["direction"]
+    st.subheader("Where it went")
+    st.caption(
+        f"ESPN tagged a direction on {direction['located']:,} of {direction['plays']:,} snaps "
+        f"({pct(direction['coverage'])}). Tech, UIW, and Washington State have none. "
+        "North Texas late in 2025 and Oklahoma State 2026 are where the tags exist."
+    )
+    if direction["located"]:
+        run_rows = direction["runs"]
+        pass_rows = direction["passes"]
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**Runs**")
+            rate_table(
+                run_rows,
+                [
+                    ("side", "Direction"),
+                    ("n", "Plays"),
+                    ("share", "Share"),
+                    ("success_rate", "Success"),
+                    ("yards_per_play", "Yds/play"),
+                ],
+                {"Share", "Success"},
+                "Red-zone run direction",
+            )
+        with right:
+            st.markdown("**Passes**")
+            rate_table(
+                pass_rows,
+                [
+                    ("depth", "Depth"),
+                    ("side", "Direction"),
+                    ("n", "Plays"),
+                    ("share", "Share"),
+                    ("success_rate", "Success"),
+                    ("yards_per_play", "Yds/play"),
+                ],
+                {"Share", "Success"},
+                "Red-zone pass depth and direction",
+            )
+    else:
+        st.info("No direction tags in this filter.")
+
+    st.subheader("Plays")
+    show = play_table(report["plays_frame"].sort_values(["date", "drive_number", "drive_play_number"], na_position="last"))
+    st.caption(f"{len(show):,} snaps. The table shows the latest 300.")
+    st.dataframe(show.tail(300), width="stretch", hide_index=True, alt="Red-zone scrimmage plays")
+    st.download_button(
+        "Download red-zone plays (CSV)",
+        show.to_csv(index=False).encode("utf-8"),
+        file_name="morris_red_zone.csv",
+        mime="text/csv",
+    )
+
+
 try:
     info = cached_meta()
 except FileNotFoundError as exc:
@@ -212,6 +529,7 @@ k8.metric("3-and-out", pct(ov["three_and_out_rate"]))
 
 tab_labels = [
     "Down & distance",
+    "Red zone",
     "Drive charts",
     "Sequencing",
     "Situations",
@@ -222,7 +540,7 @@ tab_labels = [
 # still prefers an explicit ?view= value on first load.
 if url_has_query_key("game") and "view" not in st.session_state:
     st.session_state["view"] = "Drive charts"
-tab_heat, tab_drives, tab_seq, tab_sit, tab_eras, tab_dir = st.tabs(
+tab_heat, tab_rz, tab_drives, tab_seq, tab_sit, tab_eras, tab_dir = st.tabs(
     tab_labels,
     key="view",
     bind="query-params",
@@ -257,6 +575,10 @@ with tab_heat:
         file_name="morris_plays.csv",
         mime="text/csv",
     )
+
+with tab_rz:
+    if tab_rz.open:
+        render_red_zone(era, season, drop_garbage)
 
 with tab_drives:
     games = analysis.game_list(era=era, season=season)

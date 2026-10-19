@@ -207,8 +207,14 @@ def overview(era: Any = None, season: Any = None, exclude_garbage: bool = True) 
     }
 
 
-def down_distance(era: Any = None, season: Any = None, exclude_garbage: bool = True) -> pd.DataFrame:
-    plays = filter_plays(load_tables()["plays"], era=era, season=season, exclude_garbage=exclude_garbage)
+def down_distance(
+    era: Any = None,
+    season: Any = None,
+    exclude_garbage: bool = True,
+    plays: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    if plays is None:
+        plays = filter_plays(load_tables()["plays"], era=era, season=season, exclude_garbage=exclude_garbage)
     if plays.empty:
         return pd.DataFrame()
     grouped = (
@@ -384,8 +390,14 @@ def _dir_block(sub: pd.DataFrame) -> dict:
     }
 
 
-def direction_breakdown(era: Any = None, season: Any = None, exclude_garbage: bool = True) -> dict:
-    plays = filter_plays(load_tables()["plays"], era=era, season=season, exclude_garbage=exclude_garbage)
+def direction_breakdown(
+    era: Any = None,
+    season: Any = None,
+    exclude_garbage: bool = True,
+    plays: pd.DataFrame | None = None,
+) -> dict:
+    if plays is None:
+        plays = filter_plays(load_tables()["plays"], era=era, season=season, exclude_garbage=exclude_garbage)
     plays = annotate_location(plays)
     located = plays[plays["has_location"] == True]  # noqa: E712
     runs = located[located["play_call"] == "Run"]
@@ -418,6 +430,329 @@ def direction_breakdown(era: Any = None, season: Any = None, exclude_garbage: bo
         "pass_located": int(len(passes)),
         "runs": run_rows,
         "passes": pass_rows,
+    }
+
+
+YARD_BANDS = ["11 to 20", "6 to 10", "Inside the 5"]
+FOURTH_SPOTS = [
+    "Inside the 5, 4th & 1-2",
+    "Inside the 5, 4th & 3 or more",
+    "6 to 10 yards out",
+    "11 to 20 yards out",
+]
+SCORE_SPOTS = [
+    "Leading by 9+",
+    "Leading by 1-8",
+    "Tied",
+    "Trailing by 1-8",
+    "Trailing by 9+",
+]
+DETAIL_ORDER = [
+    "Rush",
+    "Rushing TD",
+    "Complete",
+    "Passing TD",
+    "Incomplete",
+    "Sack",
+    "Scramble",
+    "Interception",
+    "Fumble (run)",
+    "Fumble (pass)",
+]
+ERA_ORDER = ["ttu", "uiw", "wsu", "unt", "osu"]
+TRIP_RESULTS = ["TD", "FG", "MISSED FG", "DOWNS", "INT", "FUMBLE", "END"]
+
+
+def _yard_band(yards_to_endzone: Any) -> str | None:
+    try:
+        yards = int(yards_to_endzone)
+    except (TypeError, ValueError):
+        return None
+    if 11 <= yards <= 20:
+        return "11 to 20"
+    if 6 <= yards <= 10:
+        return "6 to 10"
+    if 1 <= yards <= 5:
+        return "Inside the 5"
+    return None
+
+
+def _fourth_spot(yards_to_endzone: Any, distance: Any) -> str | None:
+    band = _yard_band(yards_to_endzone)
+    if band is None:
+        return None
+    if band != "Inside the 5":
+        return "6 to 10 yards out" if band == "6 to 10" else "11 to 20 yards out"
+    try:
+        dist = int(distance)
+    except (TypeError, ValueError):
+        dist = None
+    if dist is not None and dist <= 2:
+        return "Inside the 5, 4th & 1-2"
+    return "Inside the 5, 4th & 3 or more"
+
+
+def _score_spot(score_diff: Any) -> str | None:
+    try:
+        if score_diff is None or (isinstance(score_diff, float) and pd.isna(score_diff)):
+            return None
+        diff = int(score_diff)
+    except (TypeError, ValueError):
+        return None
+    if diff >= 9:
+        return "Leading by 9+"
+    if diff >= 1:
+        return "Leading by 1-8"
+    if diff == 0:
+        return "Tied"
+    if diff >= -8:
+        return "Trailing by 1-8"
+    return "Trailing by 9+"
+
+
+def _call_block(sub: pd.DataFrame) -> dict:
+    n = int(len(sub))
+    first = sub[sub["down"] == 1] if n else sub
+    called = sub[sub["play_call"].isin(["Run", "Pass"])] if n else sub
+    called_n = int(len(called))
+    return {
+        "n": n,
+        "called_n": called_n,
+        "pass_rate": rate((called["play_call"] == "Pass").sum(), called_n) if called_n else None,
+        "success_rate": rate(sub["success"].fillna(False).sum(), n) if n else None,
+        "td_rate": rate(sub["touchdown"].fillna(False).sum(), n) if n else None,
+        "turnover_rate": rate(sub["is_turnover"].fillna(False).sum(), n) if n else None,
+        "yards_per_play": mean(sub["yards"]) if n else None,
+        "first_down_n": int(len(first)),
+        "first_down_pass_rate": rate((first["play_call"] == "Pass").sum(), len(first)) if len(first) else None,
+        "rush_td": int(((sub["play_call"] == "Run") & sub["touchdown"].fillna(False)).sum()) if n else 0,
+        "pass_td": int(((sub["play_call"] == "Pass") & sub["touchdown"].fillna(False)).sum()) if n else 0,
+    }
+
+
+def _trip_stats(drives: pd.DataFrame) -> dict:
+    n = int(len(drives))
+    counts = drives["result"].value_counts() if n else pd.Series(dtype=int)
+    results = []
+    for name in TRIP_RESULTS:
+        count = int(counts.get(name, 0))
+        if count or name in {"TD", "FG"}:
+            results.append({"result": name, "n": count, "share": rate(count, n) if n else None})
+    for name, count in counts.items():
+        if name not in TRIP_RESULTS:
+            results.append({"result": str(name), "n": int(count), "share": rate(int(count), n)})
+    return {
+        "n": n,
+        "td_rate": rate(int(counts.get("TD", 0)), n) if n else None,
+        "fg_rate": rate(int(counts.get("FG", 0)), n) if n else None,
+        "score_rate": rate(int(counts.get("TD", 0) + counts.get("FG", 0)), n) if n else None,
+        "missed_fg_rate": rate(int(counts.get("MISSED FG", 0)), n) if n else None,
+        "turnover_rate": rate(int(counts.get("INT", 0) + counts.get("FUMBLE", 0)), n) if n else None,
+        "downs_rate": rate(int(counts.get("DOWNS", 0)), n) if n else None,
+        "points_per_trip": mean(drives["points"]) if n else None,
+        "results": results,
+    }
+
+
+def red_zone_report(era: Any = None, season: Any = None, exclude_garbage: bool = True) -> dict:
+    """Scrimmage calls and drive results once the ball is inside the opponent's 20."""
+    tables = load_tables()
+    plays = filter_plays(
+        tables["plays"], era=era, season=season, exclude_garbage=exclude_garbage, red_zone=True
+    ).copy()
+    zone = filter_plays(
+        tables["plays"],
+        era=era,
+        season=season,
+        exclude_garbage=exclude_garbage,
+        red_zone=True,
+        scrimmage=False,
+    )
+    rest = filter_plays(tables["plays"], era=era, season=season, exclude_garbage=exclude_garbage)
+    rest = rest[rest["red_zone"] != True]  # noqa: E712
+    drive_ids = set(plays["drive_id"].astype(str)) if not plays.empty else set()
+    drives = filter_frame(tables["drives"], era=era, season=season)
+    drives = drives[drives["drive_id"].astype(str).isin(drive_ids)].copy()
+
+    empty_block = _call_block(plays.iloc[0:0])
+    if plays.empty:
+        return {
+            "plays": 0,
+            "trips": 0,
+            "summary": empty_block,
+            "rest_plays": int(len(rest)),
+            "rest_pass_rate": rate((rest["play_call"] == "Pass").sum(), len(rest)) if len(rest) else None,
+            "trip": _trip_stats(drives),
+            "bands": [],
+            "goal_to_go": empty_block,
+            "not_goal": empty_block,
+            "first_and_goal": empty_block,
+            "down_distance": pd.DataFrame(),
+            "fourth": [],
+            "sequence": {},
+            "score": [],
+            "split_kind": "era",
+            "splits": [],
+            "details": [],
+            "shotgun": None,
+            "direction": direction_breakdown(plays=plays),
+            "plays_frame": plays,
+        }
+
+    plays["yard_band"] = plays["yards_to_endzone"].map(_yard_band)
+    bands = []
+    for band in YARD_BANDS:
+        block = _call_block(plays[plays["yard_band"] == band])
+        block["spot"] = band
+        bands.append(block)
+
+    goal = plays[plays["goal_to_go"] == True]  # noqa: E712
+    not_goal = plays[plays["goal_to_go"] != True]  # noqa: E712
+    first_and_goal = goal[goal["down"] == 1]
+
+    ordered = plays.sort_values(
+        ["game_id", "drive_number", "drive_play_number", "sequence_number"],
+        na_position="last",
+    )
+    ordered["rz_order"] = ordered.groupby("drive_id", dropna=False).cumcount()
+    later = ordered[ordered["rz_order"] > 0]
+    sequence = {
+        "First snap inside the 20": _call_block(ordered[ordered["rz_order"] == 0]),
+        "Later snaps": _call_block(later),
+        "After a run": _call_block(later[later["prev_play_call"] == "Run"]),
+        "After a pass": _call_block(later[later["prev_play_call"] == "Pass"]),
+        "After a stuff (0-1 yards)": _call_block(
+            later[(later["prev_play_call"] == "Run") & (later["prev_yards"].fillna(99) <= 1)]
+        ),
+        "After an incompletion": _call_block(
+            later[(later["prev_play_call"] == "Pass") & (later["prev_yards"].fillna(1) <= 0)]
+        ),
+    }
+
+    score_rows = []
+    spots = plays["score_diff"].map(_score_spot)
+    for spot in SCORE_SPOTS:
+        block = _call_block(plays[spots == spot])
+        block["situation"] = spot
+        score_rows.append(block)
+
+    fourth_rows = []
+    fourth = zone[(zone["down"] == 4) & (zone["play_call"].isin(["Pass", "Run", "FG"]))].copy()
+    if not fourth.empty:
+        fourth["spot"] = [
+            _fourth_spot(yte, dist)
+            for yte, dist in zip(fourth["yards_to_endzone"], fourth["distance"])
+        ]
+        raw_type = fourth["play_type_raw"].fillna("").astype(str).str.lower()
+        fourth["fg_made"] = raw_type.str.contains("good")
+    for spot in FOURTH_SPOTS:
+        sub = fourth[fourth["spot"] == spot] if not fourth.empty else fourth
+        goes = sub[sub["play_call"].isin(["Pass", "Run"])] if len(sub) else sub
+        kicks = sub[sub["play_call"] == "FG"] if len(sub) else sub
+        n = int(len(sub))
+        go_n = int(len(goes))
+        fourth_rows.append(
+            {
+                "spot": spot,
+                "n": n,
+                "kick": int(len(kicks)),
+                "made": int(kicks["fg_made"].sum()) if n and "fg_made" in kicks.columns else 0,
+                "go": go_n,
+                "pass_rate": rate((goes["play_call"] == "Pass").sum(), go_n) if go_n else None,
+                "td_rate": rate(goes["touchdown"].fillna(False).sum(), go_n) if go_n else None,
+                "success_rate": rate(goes["success"].fillna(False).sum(), go_n) if go_n else None,
+            }
+        )
+
+    detail_counts = plays["play_detail"].fillna("Other").value_counts()
+    details = []
+    seen = set()
+    for name in DETAIL_ORDER:
+        if name in detail_counts.index:
+            details.append({"detail": name, "n": int(detail_counts[name])})
+            seen.add(name)
+    for name, count in detail_counts.items():
+        if name not in seen:
+            details.append({"detail": str(name), "n": int(count)})
+    detail_total = sum(row["n"] for row in details) or 1
+    for row in details:
+        row["share"] = rate(row["n"], detail_total)
+
+    split_kind = "season" if plays["era_id"].nunique(dropna=True) <= 1 else "era"
+    if split_kind == "era":
+        groups = []
+        present = set(plays["era_id"].dropna().astype(str))
+        for era_id in ERA_ORDER:
+            if era_id in present:
+                groups.append((era_id, plays[plays["era_id"].astype(str) == era_id]))
+    else:
+        seasons = sorted(int(s) for s in plays["season"].dropna().unique())
+        groups = [(str(year), plays[plays["season"] == year]) for year in seasons]
+    splits = []
+    for key, grp in groups:
+        ids = set(grp["drive_id"].astype(str))
+        grp_drives = drives[drives["drive_id"].astype(str).isin(ids)]
+        trip = _trip_stats(grp_drives)
+        block = _call_block(grp)
+        if split_kind == "era":
+            label = str(grp["era"].iloc[0])
+        else:
+            label = str(key)
+        inside5 = grp[grp["yard_band"] == "Inside the 5"] if "yard_band" in grp.columns else grp.iloc[0:0]
+        gtg = grp[grp["goal_to_go"] == True]  # noqa: E712
+        splits.append(
+            {
+                "label": label,
+                "trips": trip["n"],
+                "td_trip_rate": trip["td_rate"],
+                "score_rate": trip["score_rate"],
+                "points_per_trip": trip["points_per_trip"],
+                "n": block["n"],
+                "pass_rate": block["pass_rate"],
+                "first_down_pass_rate": block["first_down_pass_rate"],
+                "inside5_pass_rate": _call_block(inside5)["pass_rate"],
+                "goal_pass_rate": _call_block(gtg)["pass_rate"],
+                "success_rate": block["success_rate"],
+                "td_rate": block["td_rate"],
+            }
+        )
+
+    shotgun = None
+    tagged = plays.groupby("era_id")["shotgun"].any()
+    tagged_ids = set(tagged[tagged].index.astype(str))
+    tagged_plays = plays[plays["era_id"].astype(str).isin(tagged_ids)]
+    if not tagged_plays.empty and int(tagged_plays["shotgun"].fillna(False).sum()) > 0:
+        gun = tagged_plays[tagged_plays["shotgun"] == True]  # noqa: E712
+        under = tagged_plays[tagged_plays["shotgun"] != True]  # noqa: E712
+        shotgun = {
+            "eras": sorted(tagged_plays.loc[tagged_plays["shotgun"] == True, "era"].dropna().unique().tolist()),  # noqa: E712
+            "n": int(len(tagged_plays)),
+            "shotgun_n": int(len(gun)),
+            "from_gun": _call_block(gun),
+            "under_center": _call_block(under),
+        }
+
+    return {
+        "plays": int(len(plays)),
+        "trips": int(len(drives)),
+        "summary": _call_block(plays),
+        "rest_plays": int(len(rest)),
+        "rest_pass_rate": rate((rest["play_call"] == "Pass").sum(), len(rest)) if len(rest) else None,
+        "trip": _trip_stats(drives),
+        "bands": bands,
+        "goal_to_go": _call_block(goal),
+        "not_goal": _call_block(not_goal),
+        "first_and_goal": _call_block(first_and_goal),
+        "down_distance": down_distance(plays=plays),
+        "fourth": fourth_rows,
+        "sequence": sequence,
+        "score": score_rows,
+        "split_kind": split_kind,
+        "splits": splits,
+        "details": details,
+        "shotgun": shotgun,
+        "direction": direction_breakdown(plays=plays),
+        "plays_frame": plays,
     }
 
 
