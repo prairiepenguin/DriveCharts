@@ -170,23 +170,265 @@ def play_table(df: pd.DataFrame) -> pd.DataFrame:
     return show[cols]
 
 
-def rate_table(rows: list[dict], columns: list[tuple[str, str]], percent: set[str], alt: str) -> None:
+def rate_table(
+    rows: list[dict],
+    columns: list[tuple[str, str]],
+    percent: set[str],
+    alt: str,
+    one_decimal: set[str] | None = None,
+) -> None:
     frame = pd.DataFrame(rows)
     if frame.empty:
         st.info("No plays in this slice.")
         return
     rename = {src: label for src, label in columns}
     show = frame.rename(columns=rename)[[label for _, label in columns]]
+    decimals = {"Yds/play", "Pts/trip"} | (one_decimal or set())
     config = {}
     for label in rename.values():
         if label in percent:
             config[label] = st.column_config.NumberColumn(format="percent", step=0.01)
-        elif label in {"Yds/play", "Pts/trip"}:
+        elif label in decimals:
             config[label] = st.column_config.NumberColumn(format="%.1f")
     st.dataframe(show, width="stretch", hide_index=True, column_config=config, alt=alt)
 
 
+def _gap(osu: float | None, history: float | None) -> float | None:
+    if osu is None or history is None:
+        return None
+    return round(osu - history, 4)
+
+
+def _pair_call(label: str, history: dict, osu: dict) -> dict:
+    return {
+        "slice": label,
+        "history_n": history.get("n"),
+        "history_pass": history.get("pass_rate"),
+        "osu_n": osu.get("n"),
+        "osu_pass": osu.get("pass_rate"),
+        "pass_gap": _gap(osu.get("pass_rate"), history.get("pass_rate")),
+        "history_td": history.get("td_rate"),
+        "osu_td": osu.get("td_rate"),
+        "history_success": history.get("success_rate"),
+        "osu_success": osu.get("success_rate"),
+    }
+
+
+CALL_COMPARE_COLUMNS = [
+    ("slice", "Slice"),
+    ("history_n", "History plays"),
+    ("history_pass", "History pass"),
+    ("osu_n", "OSU plays"),
+    ("osu_pass", "OSU pass"),
+    ("pass_gap", "Pass gap"),
+    ("history_td", "History TD"),
+    ("osu_td", "OSU TD"),
+    ("history_success", "History success"),
+    ("osu_success", "OSU success"),
+]
+CALL_COMPARE_PERCENTS = {
+    "History pass",
+    "OSU pass",
+    "Pass gap",
+    "History TD",
+    "OSU TD",
+    "History success",
+    "OSU success",
+}
+
+
+def render_rz_compare(drop_garbage: bool) -> None:
+    history = analysis.red_zone_report(exclude_era="osu", exclude_garbage=drop_garbage)
+    osu = analysis.red_zone_report(era="osu", exclude_garbage=drop_garbage)
+    st.caption(
+        "History is Texas Tech, Incarnate Word, Washington State, and North Texas. "
+        "Oklahoma State is the 2026 season. "
+        "Pass gap is Oklahoma State's pass rate minus history. A positive gap means Oklahoma State throws more often. "
+        "This comparison ignores the era and season filters above. The garbage-time box still applies."
+    )
+    h_trip = history["trip"]
+    o_trip = osu["trip"]
+    trip_cards = st.columns(2)
+    trip_cards[0].metric("History trips", f"{history['trips']:,}", border=True)
+    trip_cards[1].metric("Oklahoma State trips", f"{osu['trips']:,}", border=True)
+    rate_table(
+        [
+            {
+                "measure": "Points / trip",
+                "history": h_trip["points_per_trip"],
+                "osu": o_trip["points_per_trip"],
+                "gap": _gap(o_trip["points_per_trip"], h_trip["points_per_trip"]),
+            }
+        ],
+        [("measure", "Measure"), ("history", "History"), ("osu", "Oklahoma State"), ("gap", "Points gap")],
+        set(),
+        "Points per red-zone trip, history against Oklahoma State",
+        one_decimal={"History", "Oklahoma State", "Points gap"},
+    )
+    rate_table(
+        [
+            {
+                "measure": "TD rate",
+                "history": h_trip["td_rate"],
+                "osu": o_trip["td_rate"],
+                "gap": _gap(o_trip["td_rate"], h_trip["td_rate"]),
+            },
+            {
+                "measure": "Score rate",
+                "history": h_trip["score_rate"],
+                "osu": o_trip["score_rate"],
+                "gap": _gap(o_trip["score_rate"], h_trip["score_rate"]),
+            },
+            {
+                "measure": "Pass rate",
+                "history": history["summary"]["pass_rate"],
+                "osu": osu["summary"]["pass_rate"],
+                "gap": _gap(osu["summary"]["pass_rate"], history["summary"]["pass_rate"]),
+            },
+            {
+                "measure": "Success",
+                "history": history["summary"]["success_rate"],
+                "osu": osu["summary"]["success_rate"],
+                "gap": _gap(osu["summary"]["success_rate"], history["summary"]["success_rate"]),
+            },
+        ],
+        [("measure", "Measure"), ("history", "History"), ("osu", "Oklahoma State"), ("gap", "Gap")],
+        {"History", "Oklahoma State", "Gap"},
+        "Red-zone rates for prior stops and Oklahoma State",
+    )
+
+    st.subheader("The call by how close they are")
+    bands = [
+        _pair_call(h["spot"], h, o)
+        for h, o in zip(history["bands"], osu["bands"])
+    ]
+    chart = pd.DataFrame(
+        [
+            {
+                "Spot": row["slice"],
+                "Side": side,
+                "Pass rate": None if rate is None else round(rate * 100, 1),
+            }
+            for row in bands
+            for side, rate in (("History", row["history_pass"]), ("Oklahoma State", row["osu_pass"]))
+            if rate is not None
+        ]
+    )
+    if not chart.empty:
+        st.bar_chart(
+            chart,
+            x="Spot",
+            y="Pass rate",
+            color="Side",
+            x_label="Yards to the end zone",
+            y_label="Pass rate (%)",
+            sort=False,
+            alt="Red-zone pass rate by field position for history and Oklahoma State",
+        )
+    rate_table(bands, CALL_COMPARE_COLUMNS, CALL_COMPARE_PERCENTS, "Red-zone pass rate by field position, history against Oklahoma State")
+
+    st.subheader("Goal to go")
+    rate_table(
+        [
+            _pair_call("Inside the 20, not goal to go", history["not_goal"], osu["not_goal"]),
+            _pair_call("Goal to go", history["goal_to_go"], osu["goal_to_go"]),
+            _pair_call("1st and goal", history["first_and_goal"], osu["first_and_goal"]),
+        ],
+        CALL_COMPARE_COLUMNS,
+        CALL_COMPARE_PERCENTS,
+        "Goal-to-go red-zone calls, history against Oklahoma State",
+    )
+
+    st.subheader("Fourth down: kick or go")
+    fourth_rows = []
+    for h, o in zip(history["fourth"], osu["fourth"]):
+        h_go = None if not h["n"] else round(h["go"] / h["n"], 4)
+        o_go = None if not o["n"] else round(o["go"] / o["n"], 4)
+        fourth_rows.append(
+            {
+                "spot": h["spot"],
+                "history_n": h["n"],
+                "history_go": h_go,
+                "osu_n": o["n"],
+                "osu_go": o_go,
+                "go_gap": _gap(o_go, h_go),
+                "history_pass": h["pass_rate"],
+                "osu_pass": o["pass_rate"],
+            }
+        )
+    rate_table(
+        fourth_rows,
+        [
+            ("spot", "Spot"),
+            ("history_n", "History snaps"),
+            ("history_go", "History go"),
+            ("osu_n", "OSU snaps"),
+            ("osu_go", "OSU go"),
+            ("go_gap", "Go gap"),
+            ("history_pass", "History pass when they go"),
+            ("osu_pass", "OSU pass when they go"),
+        ],
+        {"History go", "OSU go", "Go gap", "History pass when they go", "OSU pass when they go"},
+        "Fourth-down go rate in the red zone, history against Oklahoma State",
+    )
+
+    st.subheader("The snap that gets them there, and what follows")
+    rate_table(
+        [
+            _pair_call(name, history["sequence"][name], osu["sequence"][name])
+            for name in history["sequence"]
+        ],
+        CALL_COMPARE_COLUMNS,
+        CALL_COMPARE_PERCENTS,
+        "Red-zone sequencing, history against Oklahoma State",
+    )
+
+    st.subheader("Score")
+    osu_score = {row["situation"]: row for row in osu["score"]}
+    rate_table(
+        [
+            _pair_call(row["situation"], row, osu_score[row["situation"]])
+            for row in history["score"]
+        ],
+        CALL_COMPARE_COLUMNS,
+        CALL_COMPARE_PERCENTS,
+        "Red-zone calls by score margin, history against Oklahoma State",
+    )
+
+    st.subheader("History by era")
+    st.caption("Oklahoma State is not in this table. It is the right-hand side of the comparisons above.")
+    rate_table(
+        history["splits"],
+        [
+            ("label", "Era"),
+            ("trips", "Trips"),
+            ("td_trip_rate", "TD trips"),
+            ("score_rate", "Score"),
+            ("points_per_trip", "Pts/trip"),
+            ("n", "Plays"),
+            ("pass_rate", "Pass"),
+            ("first_down_pass_rate", "1st-down pass"),
+            ("inside5_pass_rate", "Inside the 5"),
+            ("goal_pass_rate", "Goal to go"),
+            ("success_rate", "Success"),
+        ],
+        {"TD trips", "Score", "Pass", "1st-down pass", "Inside the 5", "Goal to go", "Success"},
+        "Red-zone results for each stop before Oklahoma State",
+    )
+
+
 def render_red_zone(era: str | None, season: str | None, drop_garbage: bool) -> None:
+    compare = st.segmented_control(
+        "Sample",
+        ["Everything", "History vs Oklahoma State"],
+        default="Everything",
+        key="rz_compare",
+        required=True,
+        help="Everything uses the era and season filters above. History vs Oklahoma State compares every earlier stop with the 2026 Oklahoma State season.",
+    )
+    if compare == "History vs Oklahoma State":
+        render_rz_compare(drop_garbage)
+        return
     report = analysis.red_zone_report(era=era, season=season, exclude_garbage=drop_garbage)
     st.caption(
         "The red zone is the opponent's 20-yard line through the goal line. "

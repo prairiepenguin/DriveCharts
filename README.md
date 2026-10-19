@@ -65,7 +65,7 @@ Current dataset: **160 games**, **2,149 drives**, **12,170 scrimmage plays** (20
 
 - Run/pass by down and distance
 - 1st-down and 3rd-down tendencies
-- Red zone: trip results, field position, goal to go, fourth down, and how the call changes by era
+- Red zone: trip results, field position, goal to go, fourth down, era changes, and a history-versus-Oklahoma State comparison
 - After run vs after pass, after stuffed run, after incompletion
 - Drive charts with every play in order
 - Era comparison (Tech / UIW / WSU / UNT / OSU)

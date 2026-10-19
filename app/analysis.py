@@ -78,6 +78,7 @@ def filter_plays(
     period: Any = None,
     opponent: str | None = None,
     game_id: str | None = None,
+    exclude_era: Any = None,
 ) -> pd.DataFrame:
     df = plays
     if scrimmage:
@@ -87,6 +88,9 @@ def filter_plays(
     eras = _values(era)
     if eras:
         df = df[df["era_id"].isin(eras) | df["era"].isin(eras)]
+    skipped = _values(exclude_era)
+    if skipped:
+        df = df[~df["era_id"].isin(skipped) & ~df["era"].isin(skipped)]
     seasons = [int(s) for s in _values(season) if str(s).lstrip("-").isdigit()]
     if seasons:
         df = df[df["season"].isin(seasons)]
@@ -113,10 +117,18 @@ def filter_plays(
     return df
 
 
-def filter_frame(df: pd.DataFrame, era: Any = None, season: Any = None) -> pd.DataFrame:
+def filter_frame(
+    df: pd.DataFrame,
+    era: Any = None,
+    season: Any = None,
+    exclude_era: Any = None,
+) -> pd.DataFrame:
     eras = _values(era)
     if eras:
         df = df[df["era_id"].isin(eras) | df["era"].isin(eras)]
+    skipped = _values(exclude_era)
+    if skipped:
+        df = df[~df["era_id"].isin(skipped) & ~df["era"].isin(skipped)]
     seasons = [int(s) for s in _values(season) if str(s).lstrip("-").isdigit()]
     if seasons:
         df = df[df["season"].isin(seasons)]
@@ -554,11 +566,21 @@ def _trip_stats(drives: pd.DataFrame) -> dict:
     }
 
 
-def red_zone_report(era: Any = None, season: Any = None, exclude_garbage: bool = True) -> dict:
+def red_zone_report(
+    era: Any = None,
+    season: Any = None,
+    exclude_garbage: bool = True,
+    exclude_era: Any = None,
+) -> dict:
     """Scrimmage calls and drive results once the ball is inside the opponent's 20."""
     tables = load_tables()
     plays = filter_plays(
-        tables["plays"], era=era, season=season, exclude_garbage=exclude_garbage, red_zone=True
+        tables["plays"],
+        era=era,
+        season=season,
+        exclude_garbage=exclude_garbage,
+        red_zone=True,
+        exclude_era=exclude_era,
     ).copy()
     zone = filter_plays(
         tables["plays"],
@@ -567,11 +589,18 @@ def red_zone_report(era: Any = None, season: Any = None, exclude_garbage: bool =
         exclude_garbage=exclude_garbage,
         red_zone=True,
         scrimmage=False,
+        exclude_era=exclude_era,
     )
-    rest = filter_plays(tables["plays"], era=era, season=season, exclude_garbage=exclude_garbage)
+    rest = filter_plays(
+        tables["plays"],
+        era=era,
+        season=season,
+        exclude_garbage=exclude_garbage,
+        exclude_era=exclude_era,
+    )
     rest = rest[rest["red_zone"] != True]  # noqa: E712
     drive_ids = set(plays["drive_id"].astype(str)) if not plays.empty else set()
-    drives = filter_frame(tables["drives"], era=era, season=season)
+    drives = filter_frame(tables["drives"], era=era, season=season, exclude_era=exclude_era)
     drives = drives[drives["drive_id"].astype(str).isin(drive_ids)].copy()
 
     empty_block = _call_block(plays.iloc[0:0])
