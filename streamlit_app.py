@@ -180,9 +180,9 @@ def rate_table(rows: list[dict], columns: list[tuple[str, str]], percent: set[st
     config = {}
     for label in rename.values():
         if label in percent:
-            config[label] = st.column_config.NumberColumn(format=".0%")
+            config[label] = st.column_config.NumberColumn(format="percent", step=0.01)
         elif label in {"Yds/play", "Pts/trip"}:
-            config[label] = st.column_config.NumberColumn(format=".1f")
+            config[label] = st.column_config.NumberColumn(format="%.1f")
     st.dataframe(show, width="stretch", hide_index=True, column_config=config, alt=alt)
 
 
