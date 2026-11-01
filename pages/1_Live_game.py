@@ -6,8 +6,9 @@ import pandas as pd
 import streamlit as st
 
 from app.analysis import load_tables
-from app.predict import WINDOWS, fit, score_game
+from app.predict import WINDOWS, fit, score_game, score_records
 from app.refresh import render_update_control
+from app.ui import metric_row
 from pipeline.classify import is_garbage_time
 from pipeline.live import fetch_schedule, fetch_summary, next_snap, parse_live, pick_default_game
 
@@ -49,18 +50,112 @@ def cached_predictor(window: str):
 
 
 def render_prediction(pred: dict) -> None:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Predicted call", pred["call"])
-    c2.metric("P(pass)", pct(pred["p_pass"]))
-    c3.metric("P(run)", pct(pred["p_run"]))
+    metric_row(
+        [
+            ("Predicted call", pred["call"], None),
+            ("P(pass)", pct(pred["p_pass"]), None),
+            ("P(run)", pct(pred["p_run"]), None),
+        ],
+        border=True,
+    )
     st.caption(
         f"{pred['situation']} · based on {pred['n']:,} similar snaps ({pred['level']}) · {pred['window']}"
     )
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("If pass, yds", num(pred["pass_ypp"]))
-    k2.metric("If run, yds", num(pred["run_ypp"]))
-    k3.metric("Pass success", pct(pred["success_if_pass"]))
-    k4.metric("Run success", pct(pred["success_if_run"]))
+    metric_row(
+        [
+            ("If pass, yds", num(pred["pass_ypp"]), None),
+            ("If run, yds", num(pred["run_ypp"]), None),
+            ("Pass success", pct(pred["success_if_pass"]), None),
+            ("Run success", pct(pred["success_if_run"]), None),
+        ],
+        border=True,
+    )
+
+
+SNAP_FIELDS = (
+    "play_id",
+    "play_call",
+    "down",
+    "distance",
+    "distance_bucket",
+    "yards_to_endzone",
+    "red_zone",
+    "backed_up",
+    "plus_territory",
+    "prev_play_call",
+    "passing_down",
+    "period",
+    "score_diff",
+    "yardline_text",
+    "clock",
+    "yards",
+    "description",
+    "garbage_time",
+)
+
+
+def _plain(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
+def pack_snaps(plays: list[dict]) -> tuple:
+    packed = []
+    for play in plays:
+        if play.get("scrimmage") and play.get("play_call") in {"Run", "Pass"}:
+            packed.append(tuple(_plain(play.get(field)) for field in SNAP_FIELDS))
+    return tuple(packed)
+
+
+@st.cache_data(show_spinner=False)
+def cached_live_score(window: str, game_id: str, packed: tuple) -> pd.DataFrame:
+    records = [dict(zip(SNAP_FIELDS, row)) for row in packed]
+    return score_records(fit(window), records, exclude_game_id=game_id)
+
+
+def render_live_score(scored: pd.DataFrame) -> None:
+    if scored.empty:
+        st.caption("No scrimmage snaps to score yet.")
+        return
+    core = scored[scored["garbage_time"] != True]  # noqa: E712
+    if core.empty:
+        core = scored
+    last = scored.iloc[-1]
+    metric_row(
+        [
+            ("Snaps scored", f"{len(core):,}", "Garbage time is left out of the rate."),
+            ("Accuracy", pct(float(core["hit"].mean())), "Predicted pass if P(pass) is at least 50%."),
+            ("Brier", num(float(core["brier"].mean()), 3), "0 is perfect. 0.25 is a coin flip."),
+        ],
+        border=True,
+    )
+    actual = last["actual"]
+    yards = int(last["yards"] or 0)
+    note = f"Last snap: predicted **{last['predicted']}**, actual **{actual}** · {yards} yards"
+    if bool(last["hit"]):
+        st.success(note)
+    else:
+        st.error(note)
+    show = scored.copy()
+    show["Hit"] = show["hit"].map(lambda flag: "Yes" if flag else "No")
+    cols = [
+        c
+        for c in ["period", "clock", "down", "distance", "predicted", "actual", "yards", "Hit", "description"]
+        if c in show.columns
+    ]
+    st.dataframe(
+        show[cols],
+        width="stretch",
+        hide_index=True,
+        column_config={"predicted": st.column_config.TextColumn("predicted", pinned=True)},
+    )
 
 
 def last_plays_table(plays: list[dict] | pd.DataFrame, n: int = 8) -> None:
@@ -78,7 +173,10 @@ def last_plays_table(plays: list[dict] | pd.DataFrame, n: int = 8) -> None:
         for c in ["period", "clock", "down", "distance", "play_call", "yards", "description"]
         if c in df.columns
     ]
-    st.dataframe(df[cols], width="stretch", hide_index=True)
+    config = {}
+    if "play_call" in cols:
+        config["play_call"] = st.column_config.TextColumn("play_call", pinned=True)
+    st.dataframe(df[cols], width="stretch", hide_index=True, column_config=config)
 
 
 window_key = st.selectbox(
@@ -90,7 +188,15 @@ window_key = st.selectbox(
 )
 predictor = cached_predictor(window_key)
 
-mode = st.radio("Mode", ["Live ESPN", "Replay a completed game"], horizontal=True)
+mode = st.segmented_control(
+    "Mode",
+    ["Live ESPN", "Replay a completed game"],
+    default="Live ESPN",
+    required=True,
+    width="stretch",
+)
+if mode is None:
+    mode = "Live ESPN"
 
 if mode == "Live ESPN":
     try:
@@ -140,9 +246,9 @@ if mode == "Live ESPN":
             sit = nxt["situation"]
             if is_garbage_time(sit.get("period"), sit.get("score_diff"), sit.get("clock")):
                 st.warning("Garbage time — Morris often runs here. The model was trained without these snaps.")
-            pred = predictor.predict(sit, exclude_game_id=None)
+            pred = predictor.predict(sit, exclude_game_id=game_id)
             render_prediction(pred)
-        last_plays_table(plays)
+        render_live_score(cached_live_score(window_key, game_id, pack_snaps(plays)))
         if drives:
             st.caption(f"{len(drives)} Oklahoma State drives so far")
 
@@ -185,30 +291,25 @@ else:
     speed = st.select_slider("Playback speed", options=["0.5x", "1x", "2x", "4x"], value="1x")
     delay = {"0.5x": 3.0, "1x": 1.8, "2x": 1.0, "4x": 0.55}[speed]
 
-    b1, b2, b3, b4, b5 = st.columns(5)
-    with b1:
-        if st.button("Play", type="primary", disabled=st.session_state.replay_playing, width="stretch"):
+    with st.container(horizontal=True, gap="small"):
+        if st.button("Play", type="primary", disabled=st.session_state.replay_playing):
             st.session_state.replay_playing = True
             st.session_state.replay_phase = "predict"
             st.rerun()
-    with b2:
-        if st.button("Pause", disabled=not st.session_state.replay_playing, width="stretch"):
+        if st.button("Pause", disabled=not st.session_state.replay_playing):
             st.session_state.replay_playing = False
             st.rerun()
-    with b3:
-        if st.button("Restart", width="stretch"):
+        if st.button("Restart"):
             st.session_state.replay_snap = 1
             st.session_state.replay_playing = False
             st.session_state.replay_phase = "predict"
             st.rerun()
-    with b4:
-        if st.button("Back", disabled=st.session_state.replay_snap <= 1, width="stretch"):
+        if st.button("Back", disabled=st.session_state.replay_snap <= 1):
             st.session_state.replay_snap -= 1
             st.session_state.replay_playing = False
             st.session_state.replay_phase = "reveal"
             st.rerun()
-    with b5:
-        if st.button("Next", disabled=st.session_state.replay_snap >= n_snaps, width="stretch"):
+        if st.button("Next", disabled=st.session_state.replay_snap >= n_snaps):
             st.session_state.replay_snap += 1
             st.session_state.replay_playing = False
             st.session_state.replay_phase = "reveal"
@@ -255,10 +356,14 @@ else:
         full = scored[scored["garbage_time"] != True]  # noqa: E712
         if full.empty:
             full = scored
-        a1, a2, a3 = st.columns(3)
-        a1.metric("Accuracy so far", pct(float(core["hit"].mean())), help="Predicted pass if P(pass) ≥ 50%.")
-        a2.metric("Brier so far", num(float(core["brier"].mean()), 3), help="0 is perfect. 0.25 is a coin flip.")
-        a3.metric("Full-game accuracy", pct(float(full["hit"].mean())))
+        metric_row(
+            [
+                ("Accuracy so far", pct(float(core["hit"].mean())), "Predicted pass if P(pass) ≥ 50%."),
+                ("Brier so far", num(float(core["brier"].mean()), 3), "0 is perfect. 0.25 is a coin flip."),
+                ("Full-game accuracy", pct(float(full["hit"].mean())), None),
+            ],
+            border=True,
+        )
         shown = scored.iloc[:snap].copy()
         shown["play_call"] = shown["actual"]
         last_plays_table(shown, n=12)

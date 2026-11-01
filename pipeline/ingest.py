@@ -95,7 +95,7 @@ def parse_header(summary: dict, team_id: int) -> dict:
         "opponent_abbrev": opp["abbrev"],
         "opp_score": opp["score"],
         "won": bool(morris["winner"]),
-        "result": "W" if morris["winner"] else "L" if (h["score"] != a["score"] or True) else "T",
+        "result": "W" if morris["winner"] else "T" if h["score"] == a["score"] else "L",
     }
 
 

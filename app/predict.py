@@ -267,3 +267,33 @@ def score_game(game_id: str, window: str = "current") -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def score_records(predictor: Predictor, records: list[dict], exclude_game_id: str | None = None) -> pd.DataFrame:
+    """Score completed scrimmage snaps that are already Run or Pass."""
+    rows = []
+    for rec in records:
+        if rec.get("play_call") not in {"Run", "Pass"}:
+            continue
+        sit = situation_from_play(rec)
+        pred = predictor.predict(sit, exclude_game_id=exclude_game_id)
+        actual = rec["play_call"]
+        rows.append(
+            {
+                "period": rec.get("period"),
+                "clock": rec.get("clock"),
+                "down": sit.get("down"),
+                "distance": sit.get("distance"),
+                "yardline_text": rec.get("yardline_text"),
+                "description": rec.get("description"),
+                "yards": rec.get("yards"),
+                "actual": actual,
+                "garbage_time": bool(rec.get("garbage_time")),
+                "predicted": pred["call"],
+                "p_pass": pred["p_pass"],
+                "situation": pred["situation"],
+                "hit": pred["call"] == actual,
+                "brier": ((pred["p_pass"] or 0) - (1 if actual == "Pass" else 0)) ** 2,
+            }
+        )
+    return pd.DataFrame(rows)

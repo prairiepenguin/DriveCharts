@@ -1,8 +1,8 @@
 {
-  "n_games": 160,
-  "n_drives": 2149,
-  "n_plays": 15890,
-  "n_scrimmage": 12170,
+  "n_games": 161,
+  "n_drives": 2162,
+  "n_plays": 15993,
+  "n_scrimmage": 12246,
   "seasons": [
     2013,
     2014,
@@ -24,7 +24,7 @@
       "era_id": "osu",
       "era": "Oklahoma State",
       "role": "HC",
-      "games": 6
+      "games": 7
     },
     {
       "era_id": "ttu",

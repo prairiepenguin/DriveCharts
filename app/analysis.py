@@ -8,7 +8,10 @@ from typing import Any
 
 import pandas as pd
 
+from pipeline.stints import STINTS
+
 ROOT = Path(__file__).resolve().parents[1]
+_ERA_ORDER = {stint["era_id"]: index for index, stint in enumerate(STINTS)}
 DATA = ROOT / "data"
 DISTANCE_BUCKETS = ["1-2", "3", "4-6", "7-9", "10", "11-15", "16+"]
 ERA_COLORS = {
@@ -311,20 +314,36 @@ def situations(era: Any = None, season: Any = None, exclude_garbage: bool = True
     return pd.DataFrame(rows)
 
 
+def _season_span(seasons: pd.Series) -> str:
+    years = sorted(int(year) for year in seasons.dropna().unique())
+    if not years:
+        return ""
+    if len(years) == 1:
+        return str(years[0])
+    if years[-1] - years[0] + 1 == len(years):
+        return f"{years[0]}–{years[-1]}"
+    return "–".join(str(year) for year in years)
+
+
 def era_table(exclude_garbage: bool = True) -> pd.DataFrame:
     tables = load_tables()
     plays = filter_plays(tables["plays"], exclude_garbage=exclude_garbage)
     drives = tables["drives"]
     games = tables["games"]
     rows = []
-    for era_id, grp in games.groupby("era_id"):
+    era_ids = sorted(
+        games["era_id"].dropna().unique(),
+        key=lambda era_id: _ERA_ORDER.get(str(era_id), 99),
+    )
+    for era_id in era_ids:
+        grp = games[games["era_id"] == era_id]
         p = plays[plays["era_id"] == era_id]
         d = drives[drives["era_id"] == era_id]
         rows.append(
             {
                 "Era": grp["era"].iloc[0],
                 "Role": grp["role"].iloc[0],
-                "Seasons": "–".join(str(s) for s in sorted(int(x) for x in grp["season"].dropna().unique())),
+                "Seasons": _season_span(grp["season"]),
                 "Games": int(len(grp)),
                 "Plays": int(len(p)),
                 "Pass %": rate((p["play_call"] == "Pass").sum(), len(p)),
@@ -360,6 +379,34 @@ def game_list(era: Any = None, season: Any = None) -> pd.DataFrame:
         lambda r: rate(r["pass_n"], r["n"]) if pd.notna(r.get("n")) else None, axis=1
     )
     return merged.sort_values(["date", "game_id"]).reset_index(drop=True)
+
+
+def game_log(
+    era: Any = None,
+    season: Any = None,
+    opponent: str | None = None,
+) -> pd.DataFrame:
+    """One row per game: result, pass rate, yards per play, and points per drive."""
+    games = game_list(era=era, season=season)
+    if games.empty:
+        return games
+    games = games.copy()
+    games["game_id"] = games["game_id"].astype(str)
+    if opponent:
+        games = games[games["opponent"].fillna("").eq(opponent)]
+    drives = filter_frame(load_tables()["drives"], era=era, season=season)
+    if drives.empty:
+        points = pd.Series(dtype=float)
+    else:
+        points = drives.assign(game_id=drives["game_id"].astype(str)).groupby("game_id")["points"].mean()
+    games["points_per_drive"] = games["game_id"].map(points)
+    yards = pd.to_numeric(games["yards"], errors="coerce")
+    plays = pd.to_numeric(games["n"], errors="coerce")
+    games["yards_per_play"] = [
+        None if pd.isna(n) or not n else round(float(y) / float(n), 2)
+        for y, n in zip(yards, plays)
+    ]
+    return games.sort_values(["date", "game_id"], ascending=[False, False]).reset_index(drop=True)
 
 
 RUN_DIR_RE = re.compile(r"\brush(?:ed)?\s+(left|right|middle)\b", re.I)
