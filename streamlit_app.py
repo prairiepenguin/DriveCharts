@@ -224,10 +224,9 @@ def drive_field_chart(drives: pd.DataFrame, plays: pd.DataFrame, selected_id: st
 
 
 def open_logged_game(gid: str) -> None:
+    # Bound widgets update their URL parameters from session state.
     st.session_state["view"] = "Drive charts"
     st.session_state["game"] = gid
-    st.query_params["view"] = "Drive charts"
-    st.query_params["game"] = gid
 
 
 def chart_drive_id(event, valid: set[str]) -> str | None:
@@ -1200,8 +1199,6 @@ elif view == "Drive charts":
             st.session_state["game"] = ids[-1]
         else:
             st.session_state["game"] = linked
-            if "game" in st.query_params and st.query_params.get("game") != linked:
-                st.query_params["game"] = linked
         game_id = st.selectbox(
             "Game",
             ids,
